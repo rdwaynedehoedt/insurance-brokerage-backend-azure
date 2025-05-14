@@ -43,10 +43,9 @@ router.post('/', authenticate, authorize(['admin', 'manager', 'sales']), async (
     
     console.log('Received client data:', JSON.stringify(clientData, null, 2));
     
-    // Set sales rep ID if not provided
-    if (!clientData.sales_rep_id && req.user?.role === 'sales') {
-      clientData.sales_rep_id = req.user.userId;
-      console.log('Setting sales_rep_id to:', clientData.sales_rep_id);
+    // Remove sales_rep_id if it exists - no longer needed
+    if (clientData.sales_rep_id) {
+      delete clientData.sales_rep_id;
     }
     
     // Validate required fields
@@ -87,15 +86,11 @@ router.put('/:id', authenticate, authorize(['admin', 'manager', 'sales']), async
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
     
-    // Sales reps can only update their own clients
-    if (
-      req.user?.role === 'sales' && 
-      existingClient.sales_rep_id !== req.user.userId
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to update this client'
-      });
+    // Remove sales_rep_id check - all users can update any client based on their role
+    
+    // Remove sales_rep_id field if it's included in the update request
+    if (clientData.sales_rep_id) {
+      delete clientData.sales_rep_id;
     }
     
     const updated = await Client.update(id, clientData);
@@ -152,9 +147,9 @@ router.post('/search', authenticate, authorize(['admin', 'manager', 'sales']), a
   try {
     const searchCriteria: Partial<ClientData> = req.body;
     
-    // Sales reps can only search their own clients
-    if (req.user?.role === 'sales') {
-      searchCriteria.sales_rep_id = req.user.userId;
+    // Remove sales_rep_id filtering - all users can search all clients
+    if (searchCriteria.sales_rep_id) {
+      delete searchCriteria.sales_rep_id;
     }
     
     const clients = await Client.search(searchCriteria);
@@ -163,20 +158,6 @@ router.post('/search', authenticate, authorize(['admin', 'manager', 'sales']), a
   } catch (error) {
     console.error('Error searching clients:', error);
     res.status(500).json({ success: false, message: 'Failed to search clients' });
-  }
-});
-
-// Get clients by sales rep ID
-router.get('/sales-rep/:id', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    
-    const clients = await Client.getBySalesRep(parseInt(id));
-    
-    res.status(200).json({ success: true, data: clients });
-  } catch (error) {
-    console.error('Error getting clients by sales rep:', error);
-    res.status(500).json({ success: false, message: 'Failed to get clients by sales rep' });
   }
 });
 

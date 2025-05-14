@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import pool from '../config/database';
+import sqlPool from '../config/database';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
@@ -15,13 +15,15 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
+    // Get connection from pool
+    const pool = await sqlPool;
+    
     // Get user from database
-    const [users] = await pool.query(
-      'SELECT * FROM users WHERE email = ?',
-      [email]
-    );
-
-    const user = (users as any[])[0];
+    const result = await pool.request()
+      .input('email', email)
+      .query('SELECT * FROM users WHERE email = @email');
+    
+    const user = result.recordset[0];
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -39,10 +41,9 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     // Update last login
-    await pool.query(
-      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
-      [user.id]
-    );
+    await pool.request()
+      .input('id', user.id)
+      .query('UPDATE users SET last_login = GETDATE() WHERE id = @id');
 
     // Generate token
     const token = generateToken(user.id, user.role);
@@ -67,12 +68,14 @@ router.post('/login', async (req: Request, res: Response) => {
 // Get current user
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const [users] = await pool.query(
-      'SELECT id, email, first_name, last_name, role FROM users WHERE id = ?',
-      [req.user?.userId]
-    );
+    // Get connection from pool
+    const pool = await sqlPool;
+    
+    const result = await pool.request()
+      .input('userId', req.user?.userId)
+      .query('SELECT id, email, first_name, last_name, role FROM users WHERE id = @userId');
 
-    const user = (users as any[])[0];
+    const user = result.recordset[0];
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -100,13 +103,15 @@ router.post('/users', authenticate, authorize(['admin']), async (req: Request, r
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
+    // Get connection from pool
+    const pool = await sqlPool;
+    
     // Check if email already exists
-    const [existingUsers] = await pool.query(
-      'SELECT id FROM users WHERE email = ?',
-      [email]
-    );
+    const existingUser = await pool.request()
+      .input('email', email)
+      .query('SELECT id FROM users WHERE email = @email');
 
-    if ((existingUsers as any[]).length > 0) {
+    if (existingUser.recordset.length > 0) {
       return res.status(409).json({ message: 'Email already in use' });
     }
 
@@ -114,14 +119,23 @@ router.post('/users', authenticate, authorize(['admin']), async (req: Request, r
     const hashedPassword = await hashPassword(password);
 
     // Insert user
-    const [result] = await pool.query(
-      'INSERT INTO users (email, password, first_name, last_name, role, phone_number, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [email, hashedPassword, firstName, lastName, role, phoneNumber, 'active']
-    );
+    const result = await pool.request()
+      .input('email', email)
+      .input('password', hashedPassword)
+      .input('firstName', firstName)
+      .input('lastName', lastName)
+      .input('role', role)
+      .input('phoneNumber', phoneNumber || null)
+      .input('status', 'active')
+      .query(`
+        INSERT INTO users (email, password, first_name, last_name, role, phone_number, status)
+        VALUES (@email, @password, @firstName, @lastName, @role, @phoneNumber, @status);
+        SELECT SCOPE_IDENTITY() AS id;
+      `);
 
     res.status(201).json({
       message: 'User created successfully',
-      userId: (result as any).insertId
+      userId: result.recordset[0].id
     });
   } catch (error) {
     console.error('Create user error:', error);
