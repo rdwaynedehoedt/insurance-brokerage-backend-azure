@@ -15,6 +15,7 @@ const config = {
     enableArithAbort: true
   },
   connectionTimeout: 30000,
+  requestTimeout: 30000,
   pool: {
     max: 10,
     min: 0,
@@ -22,9 +23,24 @@ const config = {
   }
 };
 
-// Create a global pool that will be reused across requests
+// Create a global pool
 const pool = new mssql.ConnectionPool(config);
 
-const sqlPool = pool.connect();
+// Connect with better error handling
+const sqlPool = pool.connect().catch(err => {
+  console.error('Failed to connect to Azure SQL Database:', err);
+  console.error('Connection config (without password):', {
+    server: config.server,
+    database: config.database,
+    user: config.user,
+    port: config.port
+  });
+  return Promise.reject(err);
+});
+
+// Add error listener to the pool
+pool.on('error', err => {
+  console.error('SQL Pool Error:', err);
+});
 
 export default sqlPool; 
