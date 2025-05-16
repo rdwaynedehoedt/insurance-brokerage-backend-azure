@@ -168,6 +168,13 @@ export class Client {
         return true;
       }
       
+      // Remove updated_at if it exists in the input data
+      // We will set it ourselves in the query
+      if ('updated_at' in cleanData) {
+        delete cleanData.updated_at;
+        console.log('Removed updated_at from input data, it will be set by the query');
+      }
+      
       const pool = await sqlPool;
       const request = pool.request();
       
@@ -175,16 +182,30 @@ export class Client {
       const setClause = Object.keys(cleanData)
         .map((key, index) => {
           const paramName = `p${index}`;
-          request.input(paramName, cleanData[key]);
-          return `${key} = @${paramName}`;
+          // Check for invalid column names or reserved SQL keywords
+          const safeKey = key.replace(/[^a-zA-Z0-9_]/g, '');
+          
+          // Add better error handling for parameter input
+          try {
+            request.input(paramName, cleanData[key]);
+          } catch (err) {
+            console.error(`Error adding parameter ${paramName} with value:`, cleanData[key]);
+            console.error('Parameter error:', err);
+            // Use a fallback empty string for problematic values
+            request.input(paramName, '');
+          }
+          
+          return `${safeKey} = @${paramName}`;
         })
         .join(', ');
       
       // Add id parameter
       request.input('id', id);
       
+      // Don't add updated_at in the SET clause as it's specified manually
       const query = `UPDATE clients SET ${setClause}, updated_at = GETDATE() WHERE id = @id`;
       console.log('Update query:', query);
+      console.log('Update parameters:', JSON.stringify(cleanData, null, 2));
       
       const result = await request.query(query);
       console.log('Update result:', JSON.stringify(result, null, 2));
@@ -192,6 +213,16 @@ export class Client {
       return result.rowsAffected[0] > 0;
     } catch (error) {
       console.error('Error updating client:', error);
+      // Show more details about the error
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+        if ('code' in error) {
+          console.error('SQL error code:', (error as any).code);
+        }
+        if ('number' in error) {
+          console.error('SQL error number:', (error as any).number);
+        }
+      }
       throw error;
     }
   }

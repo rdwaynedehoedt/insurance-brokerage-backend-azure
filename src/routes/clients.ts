@@ -80,35 +80,93 @@ router.put('/:id', authenticate, authorize(['admin', 'manager', 'sales']), async
     const { id } = req.params;
     const clientData: Partial<ClientData> = req.body;
     
+    // Log the incoming data for debugging
+    console.log(`Updating client ${id}:`, JSON.stringify(clientData, null, 2));
+    
     // Check if client exists
     const existingClient = await Client.getById(id);
     if (!existingClient) {
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
     
-    // Remove sales_rep_id check - all users can update any client based on their role
-    
     // Remove sales_rep_id field if it's included in the update request
     if (clientData.sales_rep_id) {
       delete clientData.sales_rep_id;
     }
     
-    const updated = await Client.update(id, clientData);
+    // Sanitize numeric fields
+    const sanitizedData: Partial<ClientData> = { ...clientData };
+    const numericFields = [
+      'sum_insured', 'basic_premium', 'srcc_premium', 'tc_premium', 
+      'net_premium', 'stamp_duty', 'admin_fees', 'road_safety_fee', 
+      'policy_fee', 'vat_fee', 'total_invoice', 'commission_basic',
+      'commission_srcc', 'commission_tc', 'policies'
+    ];
     
-    if (!updated) {
+    numericFields.forEach(field => {
+      if (field in sanitizedData) {
+        const value = sanitizedData[field as keyof ClientData];
+        if (value !== undefined && value !== null) {
+          try {
+            // Convert string values to numbers if needed
+            if (typeof value === 'string') {
+              const numValue = parseFloat(value);
+              if (!isNaN(numValue)) {
+                (sanitizedData as any)[field] = numValue;
+              } else {
+                console.warn(`Invalid numeric value for ${field}: ${value}`);
+                (sanitizedData as any)[field] = 0;
+              }
+            }
+          } catch (err) {
+            console.error(`Error processing field ${field}:`, err);
+            (sanitizedData as any)[field] = 0;
+          }
+        }
+      }
+    });
+    
+    // Try the update with sanitized data
+    try {
+      const updated = await Client.update(id, sanitizedData);
+      
+      if (!updated) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to update client - no rows affected'
+        });
+      }
+      
+      console.log(`Client ${id} successfully updated`);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Client updated successfully'
+      });
+    } catch (updateError) {
+      console.error('Database error updating client:', updateError);
+      
+      // Provide more specific error messages based on the error
+      let errorMessage = 'Failed to update client due to database error';
+      if (updateError instanceof Error) {
+        errorMessage = `Database error: ${updateError.message}`;
+      }
+      
       return res.status(500).json({
         success: false,
-        message: 'Failed to update client'
+        message: errorMessage,
+        error: updateError instanceof Error ? updateError.message : 'Unknown error'
       });
     }
-    
-    res.status(200).json({
-      success: true,
-      message: 'Client updated successfully'
-    });
   } catch (error) {
-    console.error('Error updating client:', error);
-    res.status(500).json({ success: false, message: 'Failed to update client' });
+    console.error('Error in client update route:', error);
+    
+    // Return detailed error for debugging
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update client',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 

@@ -21,7 +21,10 @@ const corsOptions = {
     ? process.env.CORS_ORIGIN || 'https://your-production-domain.com'
     : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true, // Allow cookies to be sent with requests
+  exposedHeaders: ['Content-Type', 'Content-Disposition'], // Expose headers for download
+  maxAge: 86400 // 24 hours
 };
 
 app.use(cors(corsOptions));
@@ -37,7 +40,7 @@ if (!isProduction) {
 }
 
 // Routes
-app.use('/api/auth', authRoutes);
+app.use('/insurance-brokerage/insurance-brokerage-backe/v1.0/auth', authRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/documents', documentsRoutes);
 

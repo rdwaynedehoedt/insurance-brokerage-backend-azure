@@ -1,4 +1,4 @@
-import { BlobServiceClient, ContainerClient, BlockBlobClient, PublicAccessType, BlobSASPermissions } from '@azure/storage-blob';
+import { BlobServiceClient, ContainerClient, BlockBlobClient, PublicAccessType, BlobSASPermissions, StorageSharedKeyCredential, generateBlobSASQueryParameters } from '@azure/storage-blob';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -187,9 +187,178 @@ export async function deleteDocument(blobUrl: string): Promise<void> {
   }
 }
 
-export default {
-  uploadDocument,
-  generateSasUrl,
-  deleteDocument,
-  ensureContainer,
-}; 
+export class BlobStorageService {
+  private blobServiceClient: BlobServiceClient;
+  private containerName: string = 'customer-documents';
+  private accountName: string = process.env.AZURE_STORAGE_ACCOUNT_NAME || '';
+  private accountKey: string = process.env.AZURE_STORAGE_ACCOUNT_KEY || '';
+
+  constructor() {
+    // Create shared key credential
+    const sharedKeyCredential = new StorageSharedKeyCredential(
+      this.accountName,
+      this.accountKey
+    );
+
+    // Create the BlobServiceClient
+    this.blobServiceClient = new BlobServiceClient(
+      `https://${this.accountName}.blob.core.windows.net`,
+      sharedKeyCredential
+    );
+  }
+
+  /**
+   * Upload a file to Azure Blob Storage with improved security
+   */
+  async uploadFile(
+    clientId: string,
+    documentType: string,
+    fileName: string,
+    fileContent: Buffer,
+    contentType: string
+  ): Promise<{ url: string, path: string }> {
+    try {
+      // Ensure container exists
+      await this.ensureContainer();
+
+      // Get a container client
+      const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
+      
+      // Create a path for the blob: clientId/documentType/filename
+      const blobPath = `${clientId}/${documentType}/${fileName}`;
+      
+      // Get a block blob client
+      const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
+      
+      // Upload the file
+      await blockBlobClient.upload(fileContent, fileContent.length, {
+        blobHTTPHeaders: {
+          blobContentType: contentType
+        }
+      });
+      
+      // Return the blob URL and path (without generating SAS - we'll generate that on demand)
+      return {
+        url: blockBlobClient.url,
+        path: blobPath
+      };
+    } catch (error) {
+      console.error('Error uploading to Azure Blob Storage:', error);
+      throw new Error('Failed to upload file to storage');
+    }
+  }
+
+  /**
+   * Generate a secure URL with a short-lived SAS token for a specific blob
+   */
+  async generateSecureUrl(
+    clientId: string,
+    documentType: string,
+    fileName: string,
+    expirySeconds: number = 300 // Default 5 minutes
+  ): Promise<string> {
+    try {
+      // Get a container client
+      const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
+      
+      // Create the blob path
+      const blobPath = `${clientId}/${documentType}/${fileName}`;
+      
+      // Get a blob client
+      const blobClient = containerClient.getBlobClient(blobPath);
+      
+      // Create a SAS token with specified expiry and read-only permissions
+      const expiryTime = new Date();
+      expiryTime.setSeconds(expiryTime.getSeconds() + expirySeconds);
+      
+      const sharedKeyCredential = new StorageSharedKeyCredential(
+        this.accountName,
+        this.accountKey
+      );
+      
+      const sasOptions = {
+        containerName: this.containerName,
+        blobName: blobPath,
+        permissions: BlobSASPermissions.parse("r"), // Read-only permission
+        expiresOn: expiryTime,
+      };
+      
+      const sasToken = generateBlobSASQueryParameters(
+        sasOptions,
+        sharedKeyCredential
+      ).toString();
+      
+      // Return the blob URL with SAS token
+      return `${blobClient.url}?${sasToken}`;
+    } catch (error) {
+      console.error('Error generating secure URL:', error);
+      throw new Error('Failed to generate secure access URL');
+    }
+  }
+
+  /**
+   * Delete a document from storage
+   */
+  async deleteFile(clientId: string, documentType: string, fileName: string): Promise<boolean> {
+    try {
+      // Get a container client
+      const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
+      
+      // Create the blob path
+      const blobPath = `${clientId}/${documentType}/${fileName}`;
+      
+      // Get a blob client
+      const blobClient = containerClient.getBlobClient(blobPath);
+      
+      // Delete the blob
+      await blobClient.delete();
+      
+      return true;
+    } catch (error) {
+      console.error('Error deleting blob:', error);
+      throw new Error('Failed to delete file from storage');
+    }
+  }
+
+  /**
+   * Ensure the container exists, create it if it doesn't
+   */
+  async ensureContainer(): Promise<void> {
+    try {
+      const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
+      await containerClient.createIfNotExists();
+    } catch (error) {
+      console.error('Error ensuring container exists:', error);
+      throw new Error('Failed to ensure storage container exists');
+    }
+  }
+
+  /**
+   * Legacy method for backward compatibility 
+   */
+  async uploadDocument(
+    file: { buffer: Buffer; originalname: string; mimetype: string },
+    customerId: string,
+    documentType: string
+  ): Promise<string> {
+    const fileName = `${uuidv4()}${this.getFileExtension(file.originalname)}`;
+    const result = await this.uploadFile(
+      customerId,
+      documentType,
+      fileName,
+      file.buffer,
+      file.mimetype
+    );
+    return result.url;
+  }
+
+  /**
+   * Get file extension from filename
+   */
+  private getFileExtension(filename: string): string {
+    return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 1);
+  }
+}
+
+const storageService = new BlobStorageService();
+export default storageService; 
