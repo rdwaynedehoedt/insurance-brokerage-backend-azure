@@ -25,6 +25,11 @@ export interface ClientData {
   business_registration?: string;
   svat_proof?: string;
   vat_proof?: string;
+  coverage_proof?: string;
+  sum_insured_proof?: string;
+  policy_fee_invoice?: string;
+  vat_fee_debit_note?: string;
+  payment_receipt_proof?: string;
   policy_type?: string;
   policy_no?: string;
   policy_period_from?: string;
