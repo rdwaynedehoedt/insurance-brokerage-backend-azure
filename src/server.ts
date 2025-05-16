@@ -40,7 +40,7 @@ if (!isProduction) {
 }
 
 // Routes
-app.use('/insurance-brokerage/insurance-brokerage-backe/v1.0/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/documents', documentsRoutes);
 
