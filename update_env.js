@@ -17,9 +17,7 @@ JWT_SECRET=Dwayne123
 JWT_EXPIRATION=7d
 
 # Azure Storage Configuration
-# Note: For security reasons, the actual AZURE_STORAGE_CONNECTION_STRING should be set manually
-# and not stored in version control. This is a placeholder.
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=insurancedocuments;AccountKey=YOUR_ACCOUNT_KEY_HERE;EndpointSuffix=core.windows.net
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=insurancedocuments;AccountKey=zlOWwjnwcxv1sBEpFQ70bEdDpOXBAiMy6sh4Stw7OLxCe2A8qD3FiQbgmiS/qvYfGRRS1kbh8Nr3+ASt9C4N+A==;EndpointSuffix=core.windows.net
 AZURE_STORAGE_CONTAINER_NAME=customer-documents
 `;
 
