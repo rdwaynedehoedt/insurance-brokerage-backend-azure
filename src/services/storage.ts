@@ -1,4 +1,4 @@
-import { BlobServiceClient, ContainerClient, BlockBlobClient, PublicAccessType, BlobSASPermissions, StorageSharedKeyCredential, generateBlobSASQueryParameters } from '@azure/storage-blob';
+import { BlobServiceClient, ContainerClient, BlockBlobClient, PublicAccessType, BlobSASPermissions, StorageSharedKeyCredential, generateBlobSASQueryParameters, SASProtocol } from '@azure/storage-blob';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -255,9 +255,11 @@ export class BlobStorageService {
     clientId: string,
     documentType: string,
     fileName: string,
-    expirySeconds: number = 300 // Default 5 minutes
+    expirySeconds: number = 900 // Default 15 minutes
   ): Promise<string> {
     try {
+      console.log(`Generating secure URL for: ${clientId}/${documentType}/${fileName}`);
+      
       // Get a container client
       const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
       
@@ -271,22 +273,40 @@ export class BlobStorageService {
       const expiryTime = new Date();
       expiryTime.setSeconds(expiryTime.getSeconds() + expirySeconds);
       
+      console.log(`Expiry time set to: ${expiryTime.toISOString()}`);
+      
       const sharedKeyCredential = new StorageSharedKeyCredential(
         this.accountName,
         this.accountKey
       );
       
+      // Use more permissive permissions to make it work in all browsers
+      const permissions = BlobSASPermissions.parse("r"); // Read-only permission for security
+      
       const sasOptions = {
         containerName: this.containerName,
         blobName: blobPath,
-        permissions: BlobSASPermissions.parse("r"), // Read-only permission
+        permissions: permissions,
         expiresOn: expiryTime,
+        contentDisposition: 'inline', // Ensure browser tries to display the content
+        protocol: 'https,http' as SASProtocol
       };
+      
+      console.log('SAS options:', JSON.stringify({
+        containerName: sasOptions.containerName,
+        blobName: sasOptions.blobName,
+        permissions: permissions.toString(),
+        expiresOn: expiryTime.toISOString(),
+      }));
       
       const sasToken = generateBlobSASQueryParameters(
         sasOptions,
         sharedKeyCredential
       ).toString();
+      
+      // Log the full URL (without the SAS token part for security)
+      const fullUrl = `${blobClient.url}?${sasToken.substring(0, 10)}...`;
+      console.log(`Generated URL: ${fullUrl}`);
       
       // Return the blob URL with SAS token
       return `${blobClient.url}?${sasToken}`;
@@ -357,6 +377,15 @@ export class BlobStorageService {
    */
   private getFileExtension(filename: string): string {
     return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 1);
+  }
+
+  /**
+   * Get a container client for the storage container
+   */
+  async getContainerClient(): Promise<ContainerClient> {
+    const containerClient = this.blobServiceClient.getContainerClient(this.containerName);
+    await this.ensureContainer(); // Make sure the container exists
+    return containerClient;
   }
 }
 

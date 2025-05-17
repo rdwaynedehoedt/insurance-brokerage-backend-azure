@@ -1,0 +1,10 @@
+apiVersion: core.choreo.dev/v1beta1
+kind: ComponentConfig
+spec:
+  inbound:
+    - name: Todolist API
+      port: 5000
+      type: REST
+      networkVisibility: Public
+      context: /
+      schemaFilePath: openapi.yaml

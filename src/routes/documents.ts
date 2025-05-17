@@ -154,42 +154,70 @@ router.get('/secure/:clientId/:documentType/:filename', authenticate, async (req
   try {
     const { clientId, documentType, filename } = req.params;
     
-    // Get user role from auth middleware
-    const userRole = req.user?.role;
+    console.log(`[${new Date().toISOString()}] Secure document request from ${req.ip} for: ${clientId}/${documentType}/${filename}`);
+    console.log('User info:', req.user ? { userId: req.user.userId, role: req.user.role } : 'No user info');
     
-    // Check if user has permission to access this client's documents
-    // In a real app, you would check if the user is allowed to access the client's data
-    // For example, sales reps might only access their own clients
-    // For now, we'll allow all authenticated users
+    // Check if the blob exists before generating a SAS token
+    try {
+      const containerClient = await storageService.getContainerClient();
+      const blobPath = `${clientId}/${documentType}/${filename}`;
+      const blobClient = containerClient.getBlobClient(blobPath);
+      
+      console.log('Checking if blob exists at path:', blobPath);
+      const exists = await blobClient.exists();
+      
+      if (!exists) {
+        console.error(`Blob does not exist at path: ${blobPath}`);
+        return res.status(404).json({ message: 'Document not found' });
+      }
+      
+      console.log('Blob exists, generating secure URL');
+    } catch (checkError) {
+      console.error('Error checking if blob exists:', checkError);
+      // Continue anyway to generate the URL as the error might be in the check
+    }
     
-    // Generate a short-lived URL (5 minutes)
+    // Generate a secure URL for backend access (not for direct browser access)
     const url = await storageService.generateSecureUrl(
       clientId,
       documentType,
       filename,
-      5 * 60 // 5 minutes in seconds
+      15 * 60 // 15 minutes in seconds - longer to prevent timing issues
     );
     
-    // Option 1: Redirect to the temporary URL (still shows URL in browser)
-    // return res.redirect(url);
+    console.log(`Generated secure URL: ${url.substring(0, url.indexOf('?') + 10)}...`);
     
-    // Option 2: Proxy the content through backend (better security)
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      return res.status(404).json({ message: 'Document not found' });
+    // IMPORTANT: Since public access is not permitted, we MUST proxy the content
+    // instead of redirecting to the Azure URL directly
+    try {
+      console.log('Proxying blob content through backend');
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.error(`Error fetching document: ${response.status} ${response.statusText}`);
+        return res.status(404).json({ message: 'Document not found' });
+      }
+      
+      // Get the file's content type and set it in the response
+      const contentType = response.headers.get('content-type');
+      if (contentType) {
+        res.setHeader('Content-Type', contentType);
+      }
+      
+      // Set cache headers to prevent caching issues
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      
+      // Stream the response back to the client
+      const blob = await response.blob();
+      const buffer = Buffer.from(await blob.arrayBuffer());
+      return res.send(buffer);
+    } catch (fetchError) {
+      console.error('Error fetching document from Azure:', fetchError);
+      return res.status(500).json({ 
+        message: 'Error retrieving document content',
+        error: fetchError instanceof Error ? fetchError.message : 'Unknown error'
+      });
     }
-    
-    // Get the file's content type and set it in the response
-    const contentType = response.headers.get('content-type');
-    if (contentType) {
-      res.setHeader('Content-Type', contentType);
-    }
-    
-    // Stream the response back to the client
-    const blob = await response.blob();
-    const buffer = Buffer.from(await blob.arrayBuffer());
-    return res.send(buffer);
   } catch (error) {
     console.error('Error serving document:', error);
     return res.status(500).json({ message: 'Error serving document' });
