@@ -286,7 +286,20 @@ function getFolderSize(folderPath: string): number {
 
 // Helper function to count files in local storage
 async function getLocalFilesCount(dirPath: string): Promise<any[]> {
-  const result = [];
+  // Define the return type interface
+  interface DocTypeInfo {
+    docType: string;
+    fileCount: number;
+    fileNames: string[];
+  }
+  
+  interface ClientFileInfo {
+    clientId: string;
+    totalFiles: number;
+    documentTypes: DocTypeInfo[];
+  }
+  
+  const result: ClientFileInfo[] = [];
   
   if (!fs.existsSync(dirPath)) {
     return result;
@@ -303,7 +316,7 @@ async function getLocalFilesCount(dirPath: string): Promise<any[]> {
         .filter(entry => entry.isDirectory());
       
       let totalClientFiles = 0;
-      const docTypesInfo = [];
+      const docTypesInfo: DocTypeInfo[] = [];
       
       for (const docType of docTypes) {
         const docTypeName = docType.name;
