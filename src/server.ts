@@ -34,10 +34,12 @@ app.use(express.json());
 app.use(requestLogger); // Log all requests
 
 // Remove test routes in production
+/*
 if (!isProduction) {
   const testRoutes = require('./routes/test').default;
   app.use('/api', testRoutes);
 }
+*/
 
 // Routes
 app.use('/api/auth', authRoutes);
