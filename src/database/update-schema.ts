@@ -1,73 +1,74 @@
 import fs from 'fs';
 import path from 'path';
-import mssql from 'mssql';
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-const config = {
-  server: process.env.AZURE_SQL_SERVER || '',
-  database: process.env.AZURE_SQL_DATABASE || '',
-  user: process.env.AZURE_SQL_USER || '',
-  password: process.env.AZURE_SQL_PASSWORD || '',
-  port: Number(process.env.AZURE_SQL_PORT) || 1433,
-  options: {
-    encrypt: true, // For Azure SQL
-    trustServerCertificate: false,
-    enableArithAbort: true
-  }
-};
+import sqlPool from '../config/database';
 
 async function updateSchema() {
-  console.log('Starting schema update...');
-  console.log('Connection config (without password):', {
-    server: config.server,
-    database: config.database,
-    user: config.user,
-    port: config.port
-  });
-
   try {
-    // Connect to database
-    const pool = await mssql.connect(config);
-    console.log('Connected to database');
-
-    // Read and execute alter-clients.sql file
-    const alterScriptPath = path.join(__dirname, 'alter-clients.sql');
-    console.log(`Reading SQL script from: ${alterScriptPath}`);
+    console.log('Starting database schema update...');
+    const startTime = process.hrtime();
     
-    const alterScript = fs.readFileSync(alterScriptPath, 'utf8');
-    const sqlBatches = alterScript.split('GO').filter(batch => batch.trim() !== '');
+    // Get connection from pool
+    const pool = await sqlPool;
     
-    console.log(`Found ${sqlBatches.length} SQL batches to execute`);
+    // Read and execute the schema update SQL
+    const schemaUpdatePath = path.join(__dirname, 'alter-clients.sql');
+    const schemaUpdateSql = fs.readFileSync(schemaUpdatePath, 'utf8');
     
-    for (let i = 0; i < sqlBatches.length; i++) {
-      const batch = sqlBatches[i];
-      console.log(`Executing batch ${i + 1}/${sqlBatches.length}...`);
-      try {
-        await pool.request().query(batch);
-        console.log(`Batch ${i + 1} executed successfully`);
-      } catch (err) {
-        console.error(`Error executing batch ${i + 1}:`, err);
-        throw err;
-      }
+    console.log('Executing schema update SQL...');
+    await pool.request().batch(schemaUpdateSql);
+    
+    // Add performance optimizations
+    console.log('Applying performance optimizations...');
+    
+    // Check if email index exists on users table
+    const indexCheckResult = await pool.request().query(`
+      SELECT COUNT(*) as count
+      FROM sys.indexes 
+      WHERE name = 'idx_users_email' AND object_id = OBJECT_ID('users')
+    `);
+    
+    const indexExists = indexCheckResult.recordset[0].count > 0;
+    
+    if (!indexExists) {
+      console.log('Creating index on users.email for faster login queries...');
+      await pool.request().query(`
+        CREATE INDEX idx_users_email ON users(email);
+      `);
+      console.log('Email index created successfully.');
+    } else {
+      console.log('Email index already exists.');
     }
     
-    console.log('Database schema updated successfully!');
-    pool.close();
-  } catch (err) {
-    console.error('Error updating schema:', err);
-    process.exit(1);
+    const endTime = process.hrtime(startTime);
+    const duration = (endTime[0] * 1000 + endTime[1] / 1000000).toFixed(2);
+    
+    console.log(`Schema update completed successfully in ${duration}ms.`);
+    
+    // Close the connection
+    await pool.close();
+    
+    return true;
+  } catch (error) {
+    console.error('Error updating schema:', error);
+    return false;
   }
 }
 
-// Run the schema update
-updateSchema()
-  .then(() => {
-    console.log('Schema update completed');
-    process.exit(0);
-  })
-  .catch(err => {
-    console.error('Schema update failed:', err);
-    process.exit(1);
-  }); 
+// Run the update if this script is executed directly
+if (require.main === module) {
+  updateSchema()
+    .then(success => {
+      if (success) {
+        console.log('Schema update completed.');
+      } else {
+        console.error('Schema update failed.');
+        process.exit(1);
+      }
+    })
+    .catch(err => {
+      console.error('Unexpected error:', err);
+      process.exit(1);
+    });
+}
+
+export default updateSchema; 

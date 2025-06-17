@@ -29,4 +29,25 @@ export const errorLogger = (err: Error) => {
   
   // In a production environment, you might want to log to a file or external service
   // This is where you would integrate with services like Application Insights, Winston, etc.
+};
+
+/**
+ * Logs performance metrics in a structured JSON format
+ * @param operation - The operation being performed (e.g., 'login', 'file_upload')
+ * @param data - Object containing performance metrics and contextual information
+ */
+export const logPerformance = (operation: string, data: Record<string, any>) => {
+  // Add operation name to the data
+  const logData = {
+    operation,
+    ...data,
+  };
+  
+  // Log as structured JSON for easier parsing by log analysis tools
+  console.log(JSON.stringify(logData));
+  
+  // TODO: In production, send these metrics to Application Insights or another monitoring service
+  // Example: if (process.env.NODE_ENV === 'production' && appInsights) {
+  //   appInsights.trackMetric({ name: `${operation}_duration`, value: data.total_duration_ms });
+  // }
 }; 

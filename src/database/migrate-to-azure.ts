@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import sqlPool from '../config/database';
+import updateSchema from './update-schema';
+import { logPerformance } from '../middleware/logging';
 
 dotenv.config();
 
@@ -213,4 +216,151 @@ async function migrateDatabase() {
 migrateDatabase().catch(err => {
   console.error('Unhandled error during migration:', err);
   process.exit(1);
-}); 
+});
+
+/**
+ * This script applies performance optimizations to the Azure SQL database
+ * for improved login performance and general system responsiveness.
+ */
+async function applyPerformanceOptimizations() {
+  console.log('Starting performance optimization process...');
+  const startTime = process.hrtime();
+  
+  try {
+    // Get connection from pool
+    const pool = await sqlPool;
+    
+    // 1. Apply schema updates including the email index
+    console.log('Applying schema updates...');
+    await updateSchema();
+    
+    // 2. Check and optimize existing indexes
+    console.log('Checking database indexes...');
+    const indexStats = await pool.request().query(`
+      SELECT 
+        OBJECT_NAME(i.object_id) AS TableName,
+        i.name AS IndexName,
+        i.type_desc AS IndexType,
+        STATS_DATE(i.object_id, i.index_id) AS LastUpdated
+      FROM sys.indexes i
+      INNER JOIN sys.objects o ON i.object_id = o.object_id
+      WHERE o.type = 'U' -- User tables only
+      ORDER BY OBJECT_NAME(i.object_id), i.index_id;
+    `);
+    
+    console.log(`Found ${indexStats.recordset.length} indexes in the database`);
+    
+    // 3. Update statistics for better query performance
+    console.log('Updating statistics for better query optimization...');
+    await pool.request().query(`
+      EXEC sp_updatestats;
+    `);
+    
+    // 4. Check for missing indexes that might benefit login performance
+    console.log('Checking for missing indexes...');
+    const missingIndexes = await pool.request().query(`
+      SELECT TOP 5
+        CONVERT (varchar, getdate(), 126) AS runtime,
+        migs.avg_total_user_cost * (migs.avg_user_impact / 100.0) * (migs.user_seeks + migs.user_scans) AS improvement_measure,
+        'CREATE INDEX missing_index_' + CONVERT (varchar, mig.index_group_handle) + '_' + CONVERT (varchar, mid.index_handle)
+        + ' ON ' + mid.statement
+        + ' (' + ISNULL (mid.equality_columns,'')
+        + CASE WHEN mid.equality_columns IS NOT NULL AND mid.inequality_columns IS NOT NULL THEN ',' ELSE '' END
+        + ISNULL (mid.inequality_columns, '')
+        + ')'
+        + ISNULL (' INCLUDE (' + mid.included_columns + ')', '') AS create_index_statement,
+        migs.user_seeks,
+        migs.user_scans,
+        migs.last_user_seek,
+        migs.avg_total_user_cost,
+        migs.avg_user_impact
+      FROM sys.dm_db_missing_index_groups mig
+      INNER JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
+      INNER JOIN sys.dm_db_missing_index_details mid ON mig.index_handle = mid.index_handle
+      ORDER BY migs.avg_total_user_cost * migs.avg_user_impact * (migs.user_seeks + migs.user_scans) DESC;
+    `);
+    
+    if (missingIndexes.recordset.length > 0) {
+      console.log('Suggested missing indexes:');
+      missingIndexes.recordset.forEach((idx: any, i: number) => {
+        console.log(`${i + 1}. ${idx.create_index_statement}`);
+        console.log(`   Potential improvement: ${idx.improvement_measure.toFixed(2)}`);
+        console.log(`   User seeks: ${idx.user_seeks}, User scans: ${idx.user_scans}`);
+        console.log('---');
+      });
+    } else {
+      console.log('No missing indexes detected.');
+    }
+    
+    // 5. Check for unused indexes that might be slowing down inserts/updates
+    console.log('Checking for unused indexes...');
+    const unusedIndexes = await pool.request().query(`
+      SELECT 
+        OBJECT_NAME(i.object_id) AS TableName,
+        i.name AS IndexName,
+        i.type_desc AS IndexType,
+        s.user_seeks,
+        s.user_scans,
+        s.user_lookups,
+        s.user_updates
+      FROM sys.indexes i
+      INNER JOIN sys.objects o ON i.object_id = o.object_id
+      LEFT JOIN sys.dm_db_index_usage_stats s ON i.object_id = s.object_id AND i.index_id = s.index_id
+      WHERE o.type = 'U' -- User tables only
+        AND i.is_primary_key = 0 -- Not primary key
+        AND i.is_unique = 0 -- Not unique constraint
+        AND (s.user_seeks = 0 OR s.user_seeks IS NULL)
+        AND (s.user_scans = 0 OR s.user_scans IS NULL)
+        AND (s.user_lookups = 0 OR s.user_lookups IS NULL)
+      ORDER BY ISNULL(s.user_updates, 0) DESC;
+    `);
+    
+    if (unusedIndexes.recordset.length > 0) {
+      console.log('Potentially unused indexes:');
+      unusedIndexes.recordset.forEach((idx: any, i: number) => {
+        console.log(`${i + 1}. ${idx.TableName}.${idx.IndexName} (${idx.IndexType})`);
+        console.log(`   Seeks: ${idx.user_seeks || 0}, Scans: ${idx.user_scans || 0}, Lookups: ${idx.user_lookups || 0}, Updates: ${idx.user_updates || 0}`);
+      });
+    } else {
+      console.log('No unused indexes detected.');
+    }
+    
+    const endTime = process.hrtime(startTime);
+    const duration = (endTime[0] * 1000 + endTime[1] / 1000000).toFixed(2);
+    
+    console.log(`Performance optimization completed in ${duration}ms`);
+    
+    logPerformance('database_optimization', {
+      timestamp: new Date().toISOString(),
+      duration_ms: duration,
+      indexes_found: indexStats.recordset.length,
+      missing_indexes: missingIndexes.recordset.length,
+      unused_indexes: unusedIndexes.recordset.length
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error during performance optimization:', error);
+    return false;
+  }
+}
+
+// Run the optimization if this script is executed directly
+if (require.main === module) {
+  applyPerformanceOptimizations()
+    .then(success => {
+      if (success) {
+        console.log('Performance optimization completed successfully.');
+        process.exit(0);
+      } else {
+        console.error('Performance optimization failed.');
+        process.exit(1);
+      }
+    })
+    .catch(err => {
+      console.error('Unexpected error:', err);
+      process.exit(1);
+    });
+}
+
+export default applyPerformanceOptimizations; 

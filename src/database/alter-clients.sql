@@ -30,4 +30,18 @@ END
 GO
 
 PRINT 'Database schema updated with new document fields';
-GO 
+GO
+
+-- Add email index to users table if it doesn't exist
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_users_email' AND object_id = OBJECT_ID('users'))
+BEGIN
+    CREATE INDEX idx_users_email ON users(email);
+    PRINT 'Created index on users.email for faster login queries';
+END
+ELSE
+BEGIN
+    PRINT 'Index on users.email already exists';
+END
+GO
+
+-- Add any other performance-related database changes below 
