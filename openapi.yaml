@@ -677,6 +677,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
   
+  /api/clients/import-csv:
+    post:
+      tags:
+        - Clients
+      summary: Import clients from CSV
+      description: Import multiple clients from a CSV file
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV file containing client data. Must include required fields - customer_type, product, insurance_provider, client_name, mobile_no
+      responses:
+        '200':
+          description: Clients imported successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  count:
+                    type: integer
+                    description: Number of clients successfully imported
+                  ids:
+                    type: array
+                    items:
+                      type: string
+                    description: IDs of the created clients
+        '400':
+          description: Invalid request - No file uploaded or CSV missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  
   /api/documents/upload/{clientId}/{documentType}:
     post:
       tags:
@@ -963,254 +1029,4 @@ paths:
                 type: object
                 properties:
                   status:
-                    type: string
-                    
-  /api/clients/import-csv:
-    post:
-      tags:
-        - Clients
-      summary: Import clients from CSV
-      description: Import multiple clients from a CSV file
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - file
-              properties:
-                file:
-                  type: string
-                  format: binary
-                  description: CSV file containing client data. Must include required fields - customer_type, product, insurance_provider, client_name, mobile_no
-      responses:
-        '200':
-          description: Clients imported successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  message:
-                    type: string
-                  count:
-                    type: integer
-                    description: Number of clients successfully imported
-                  ids:
-                    type: array
-                    items:
-                      type: string
-                    description: IDs of the created clients
-        '400':
-          description: Invalid request - No file uploaded or CSV missing required fields
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          description: Unauthorized - Not authenticated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Forbidden - Insufficient permissions
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /api/documents/token/{clientId}/{documentType}/{filename}:
-    get:
-      tags:
-        - Documents
-      summary: Generate temporary access token
-      description: Generate a temporary token for accessing a document without authentication
-      security:
-        - BearerAuth: []
-      parameters:
-        - in: path
-          name: clientId
-          required: true
-          schema:
-            type: string
-          description: Client ID
-        - in: path
-          name: documentType
-          required: true
-          schema:
-            type: string
-          description: Document type
-        - in: path
-          name: filename
-          required: true
-          schema:
-            type: string
-          description: Filename
-      responses:
-        '200':
-          description: Token generated successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  token:
-                    type: string
-                    description: Temporary access token
-                  url:
-                    type: string
-                    description: URL for accessing the document with the token
-                  expires:
-                    type: string
-                    format: date-time
-                    description: Token expiration time (30 minutes from creation)
-        '401':
-          description: Unauthorized - Not authenticated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /api/documents/public/{token}/{clientId}/{documentType}/{filename}:
-    get:
-      tags:
-        - Documents
-      summary: Access document with temporary token
-      description: Access a document using a temporary token without authentication
-      security: []
-      parameters:
-        - in: path
-          name: token
-          required: true
-          schema:
-            type: string
-          description: Temporary access token
-        - in: path
-          name: clientId
-          required: true
-          schema:
-            type: string
-          description: Client ID
-        - in: path
-          name: documentType
-          required: true
-          schema:
-            type: string
-          description: Document type
-        - in: path
-          name: filename
-          required: true
-          schema:
-            type: string
-          description: Filename
-      responses:
-        '200':
-          description: Document content
-          content:
-            image/jpeg: {}
-            image/png: {}
-            image/gif: {}
-            application/pdf: {}
-        '403':
-          description: Invalid or expired token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Document not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  /:
-    get:
-      tags:
-        - System
-      summary: API information
-      description: Get basic API information
-      security: []
-      responses:
-        '200':
-          description: API information
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  version:
-                    type: string
-                  status:
-                    type: string
-
-  /api/metrics:
-    get:
-      tags:
-        - System
-      summary: System metrics
-      description: Get system metrics for monitoring (internal use)
-      responses:
-        '200':
-          description: System metrics
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  timestamp:
-                    type: string
-                    format: date-time
-                  db_pool:
-                    type: object
-                    description: Database connection pool statistics
-                  memory_usage:
-                    type: object
-                    properties:
-                      rss:
-                        type: integer
-                        description: RSS memory usage in MB
-                      heapTotal:
-                        type: integer
-                        description: Heap total in MB
-                      heapUsed:
-                        type: integer
-                        description: Heap used in MB
-                      external:
-                        type: integer
-                        description: External memory in MB
-                  uptime:
-                    type: number
-                    description: Server uptime in seconds
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error' 
+                    type: string 
