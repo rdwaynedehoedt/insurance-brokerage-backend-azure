@@ -1,4 +1,4 @@
-import sqlPool from '../config/database';
+import db from '../config/database';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ClientData {
@@ -60,7 +60,8 @@ export class Client {
   // Create a new client
   static async create(data: ClientData): Promise<string> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.ensureConnection();
       const clientId = data.id || `C${uuidv4().substring(0, 8)}`;
       
       // Create a clean copy of data without undefined values and remove the id field
@@ -111,7 +112,8 @@ export class Client {
   // Get a client by ID
   static async getById(id: string): Promise<ClientData | null> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.getConnection();
       const request = pool.request();
       request.input('id', id);
       
@@ -131,7 +133,8 @@ export class Client {
   // Get all clients
   static async getAll(limit: number = 100, offset: number = 0): Promise<ClientData[]> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.getConnection();
       const request = pool.request();
       request.input('limit', limit);
       request.input('offset', offset);
@@ -154,6 +157,8 @@ export class Client {
   // Update a client
   static async update(id: string, data: Partial<ClientData>): Promise<boolean> {
     try {
+      console.log('Client.update called with ID:', id);
+      
       // Create a clean copy of data without undefined values
       const cleanData: any = {};
       Object.entries(data).forEach(([key, value]) => {
@@ -175,7 +180,10 @@ export class Client {
         console.log('Removed updated_at from input data, it will be set by the query');
       }
       
-      const pool = await sqlPool;
+      console.log('Getting database connection...');
+      // Get a database connection with retry mechanism
+      const pool = await db.ensureConnection();
+      console.log('Database connection acquired successfully');
       const request = pool.request();
       
       // Create SET clause for SQL and add parameters
@@ -230,7 +238,8 @@ export class Client {
   // Delete a client
   static async delete(id: string): Promise<boolean> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.getConnection();
       const request = pool.request();
       request.input('id', id);
       
@@ -245,23 +254,42 @@ export class Client {
   // Search clients by various criteria
   static async search(criteria: Partial<ClientData>): Promise<ClientData[]> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.getConnection();
       const request = pool.request();
       
-      const whereConditions = Object.keys(criteria)
-        .map((key, index) => {
-          const paramName = `p${index}`;
-          request.input(paramName, `%${criteria[key as keyof ClientData]}%`);
-          return `${key} LIKE @${paramName}`;
-        })
-        .join(' OR ');
+      // Build WHERE clauses
+      const whereClauses: string[] = [];
+      let paramIndex = 0;
       
-      const result = await request.query(`
-        SELECT TOP 100 * FROM clients 
-        WHERE ${whereConditions} 
+      Object.entries(criteria).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          const paramName = `p${paramIndex++}`;
+          const safeKey = key.replace(/[^a-zA-Z0-9_]/g, '');
+          
+          if (typeof value === 'string') {
+            // For string values, use LIKE for partial matching
+            whereClauses.push(`${safeKey} LIKE @${paramName}`);
+            request.input(paramName, `%${value}%`);
+          } else {
+            // For other types (number, boolean), use exact matching
+            whereClauses.push(`${safeKey} = @${paramName}`);
+            request.input(paramName, value);
+          }
+        }
+      });
+      
+      const whereClause = whereClauses.length > 0 
+        ? `WHERE ${whereClauses.join(' AND ')}`
+        : '';
+      
+      const query = `
+        SELECT * FROM clients 
+        ${whereClause}
         ORDER BY created_at DESC
-      `);
+      `;
       
+      const result = await request.query(query);
       return result.recordset;
     } catch (error) {
       console.error('Error searching clients:', error);
@@ -269,22 +297,23 @@ export class Client {
     }
   }
   
-  // Get clients by sales rep ID
+  // Get clients by sales rep
   static async getBySalesRep(salesRepId: number): Promise<ClientData[]> {
     try {
-      const pool = await sqlPool;
+      // Get a database connection with retry mechanism
+      const pool = await db.getConnection();
       const request = pool.request();
       request.input('salesRepId', salesRepId);
       
       const result = await request.query(`
         SELECT * FROM clients 
-        WHERE sales_rep_id = @salesRepId 
+        WHERE sales_rep_id = @salesRepId
         ORDER BY created_at DESC
       `);
       
       return result.recordset;
     } catch (error) {
-      console.error('Error getting clients by sales rep:', error);
+      console.error(`Error getting clients for sales rep ${salesRepId}:`, error);
       throw error;
     }
   }

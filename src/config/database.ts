@@ -26,6 +26,11 @@ const config = {
 // Create a global pool
 const pool = new mssql.ConnectionPool(config);
 
+// Track connection status
+let isConnected = false;
+let connectionError: Error | null = null;
+let connectionPromise: Promise<mssql.ConnectionPool> | null = null;
+
 // Connection pool metrics
 export const getPoolStats = () => {
   // Note: accessing internal pool properties - these may change in future mssql versions
@@ -38,41 +43,117 @@ export const getPoolStats = () => {
     borrowed: poolAny.pool ? poolAny.pool.borrowed : 0,
     pending: poolAny.pool ? poolAny.pool.pending : 0,
     max: config.pool.max,
-    min: config.pool.min
+    min: config.pool.min,
+    connected: isConnected,
+    hasError: !!connectionError
   };
 };
 
-// Connect with better error handling
-const sqlPool = pool.connect().catch(err => {
-  console.error('Failed to connect to Azure SQL Database:', err);
-  console.error('Connection config (without password):', {
-    server: config.server,
-    database: config.database,
-    user: config.user,
-    port: config.port
-  });
-  return Promise.reject(err);
-});
+// Function to get a connection with retry
+const getConnection = async (retries = 3, delay = 1000): Promise<mssql.ConnectionPool> => {
+  // If we're already connected, return the pool
+  if (isConnected && !connectionError) {
+    return pool;
+  }
+  
+  // If a connection is in progress, wait for it
+  if (connectionPromise) {
+    try {
+      return await connectionPromise;
+    } catch (err) {
+      // If the existing promise failed, continue to retry
+      connectionPromise = null;
+    }
+  }
 
-// Add error listener to the pool
+  // Retry logic
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      console.log(`Attempting database connection (attempt ${attempt + 1}/${retries})...`);
+      
+      // Create a new connection promise
+      connectionPromise = pool.connect();
+      
+      // Wait for connection
+      await connectionPromise;
+      
+      // If we get here, connection was successful
+      isConnected = true;
+      connectionError = null;
+      console.log('Successfully connected to database');
+      return pool;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      connectionError = lastError;
+      isConnected = false;
+      console.error(`Database connection attempt ${attempt + 1}/${retries} failed:`, err);
+      
+      // Wait before retrying
+      if (attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        // Increase delay with each retry (exponential backoff)
+        delay *= 2;
+      }
+    }
+  }
+
+  // If we're here, all retries failed
+  console.error('All database connection attempts failed');
+  connectionPromise = null;
+  throw lastError || new Error('Failed to connect to database after multiple attempts');
+};
+
+// Listen for connection errors
 pool.on('error', err => {
   console.error('SQL Pool Error:', err);
+  isConnected = false;
+  connectionError = err;
+  connectionPromise = null;
 });
 
-// TODO: Implement keep-alive mechanism to prevent cold starts
-// This function should be called periodically (e.g., every 5 minutes)
-// to keep the connection pool warm and prevent Azure SQL from going idle
-export const keepConnectionWarm = async () => {
+// Function to check connection health and reconnect if needed
+export const ensureConnection = async (): Promise<mssql.ConnectionPool> => {
   try {
-    const poolInstance = await sqlPool;
-    const result = await poolInstance.request().query('SELECT 1 AS KeepAlive');
-    console.log(`Keep-alive ping successful: ${result.recordset[0].KeepAlive === 1}`);
-    return true;
+    // Try to get a connection
+    const connection = await getConnection();
+    
+    // Test the connection with a simple query
+    await connection.request().query('SELECT 1 AS ConnectionTest');
+    return connection;
+  } catch (err) {
+    console.error('Connection health check failed:', err);
+    // Force reconnection on next attempt
+    isConnected = false;
+    connectionError = err instanceof Error ? err : new Error(String(err));
+    connectionPromise = null;
+    throw err;
+  }
+};
+
+// Function for keeping connection warm
+export const keepConnectionWarm = async (): Promise<boolean> => {
+  try {
+    const connection = await ensureConnection();
+    const result = await connection.request().query('SELECT 1 AS KeepAlive');
+    const success = result.recordset[0].KeepAlive === 1;
+    console.log(`Keep-alive ping successful: ${success}`);
+    return success;
   } catch (error) {
     console.error('Keep-alive ping failed:', error);
     return false;
   }
 };
 
-// Export the connection pool
-export default sqlPool; 
+// Initialize connection
+console.log('Initializing database connection pool...');
+// Don't block startup on initial connection
+getConnection()
+  .then(() => console.log('Initial database connection established'))
+  .catch(err => console.error('Initial database connection failed:', err));
+
+// Export the connection getter function instead of the raw pool
+export default { 
+  getConnection,
+  ensureConnection
+}; 
