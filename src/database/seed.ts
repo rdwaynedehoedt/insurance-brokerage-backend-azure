@@ -1,9 +1,9 @@
-import sqlPool from '../config/database';
+import db from '../config/database';
 import { hashPassword } from '../utils/auth';
 
 async function seedDatabase() {
   try {
-    const pool = await sqlPool;
+    const pool = await db.ensureConnection();
     
     // Clear existing users
     await pool.request().query('DELETE FROM users');
@@ -73,8 +73,8 @@ async function seedDatabase() {
     console.log('Test users created successfully');
     console.log('Database seeding completed');
     
-    await pool.close();
-    console.log('Database connection closed');
+    // No need to close the connection when using the pool
+    console.log('Database connection will be returned to the pool');
     
     process.exit(0);
   } catch (error) {

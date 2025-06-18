@@ -1,11 +1,11 @@
-import sqlPool from '../config/database';
+import db from '../config/database';
 import fs from 'fs';
 import path from 'path';
 
 async function initializeDatabase() {
   try {
     // Get the connection pool
-    const pool = await sqlPool;
+    const pool = await db.ensureConnection();
     console.log('Connected to Azure SQL Database');
     
     // Create users table
@@ -145,8 +145,9 @@ async function initializeDatabase() {
     `);
     console.log('Default admin user created or verified');
     
-    await pool.close();
-    console.log('Database connection closed');
+    // Since we're using the connection pool via db.ensureConnection(),
+    // we don't need to close it directly (it's managed by the module)
+    console.log('Database connection will be returned to the pool');
     
     process.exit(0);
   } catch (error) {

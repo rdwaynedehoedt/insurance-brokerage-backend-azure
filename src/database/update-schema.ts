@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import sqlPool from '../config/database';
+import db from '../config/database';
 
 async function updateSchema() {
   try {
@@ -8,7 +8,7 @@ async function updateSchema() {
     const startTime = process.hrtime();
     
     // Get connection from pool
-    const pool = await sqlPool;
+    const pool = await db.ensureConnection();
     
     // Read and execute the schema update SQL
     const schemaUpdatePath = path.join(__dirname, 'alter-clients.sql');
@@ -44,8 +44,8 @@ async function updateSchema() {
     
     console.log(`Schema update completed successfully in ${duration}ms.`);
     
-    // Close the connection
-    await pool.close();
+    // No need to close the connection when using the pool
+    console.log('Database connection will be returned to the pool');
     
     return true;
   } catch (error) {

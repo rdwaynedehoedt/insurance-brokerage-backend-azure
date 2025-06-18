@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import sqlPool from '../config/database';
+import db from '../config/database';
 import updateSchema from './update-schema';
 import { logPerformance } from '../middleware/logging';
 
@@ -228,7 +228,7 @@ async function applyPerformanceOptimizations() {
   
   try {
     // Get connection from pool
-    const pool = await sqlPool;
+    const pool = await db.ensureConnection();
     
     // 1. Apply schema updates including the email index
     console.log('Applying schema updates...');
