@@ -48,6 +48,26 @@ app.use(compression()); // Gzip compression
 app.use(express.json());
 app.use(requestLogger); // Log all requests
 
+// Add a diagnostic endpoint to see what paths are being received
+app.get('/path-test', (req: Request, res: Response) => {
+  const pathInfo = {
+    originalUrl: req.originalUrl,
+    path: req.path,
+    baseUrl: req.baseUrl,
+    url: req.url,
+    headers: req.headers,
+    method: req.method,
+    query: req.query,
+  };
+  
+  console.log('Path test endpoint called with:', JSON.stringify(pathInfo, null, 2));
+  
+  res.status(200).json({
+    message: 'Path test endpoint',
+    pathInfo
+  });
+});
+
 // Add DB connectivity check middleware for critical endpoints
 const checkDatabaseConnection = async (req: Request, res: Response, next: NextFunction) => {
   // Only check on auth endpoints
