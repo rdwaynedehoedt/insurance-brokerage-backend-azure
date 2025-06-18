@@ -8,12 +8,6 @@ import clientRoutes from './routes/clients';
 import documentsRoutes from './routes/documents';
 import { errorLogger, requestLogger } from './middleware/logging';
 import db, { getPoolStats, keepConnectionWarm } from './config/database';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { authenticate, authorize, AuthRequest } from './middleware/auth';
-import { Client, ClientData } from './models/Client';
-import csv from 'csv-parser';
 
 // Load environment variables
 dotenv.config();
@@ -21,14 +15,6 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
-
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const upload = multer({ dest: uploadsDir });
 
 // Middleware
 const corsOptions = {
@@ -47,26 +33,6 @@ app.use(helmet()); // Security headers
 app.use(compression()); // Gzip compression
 app.use(express.json());
 app.use(requestLogger); // Log all requests
-
-// Add a diagnostic endpoint to see what paths are being received
-app.get('/path-test', (req: Request, res: Response) => {
-  const pathInfo = {
-    originalUrl: req.originalUrl,
-    path: req.path,
-    baseUrl: req.baseUrl,
-    url: req.url,
-    headers: req.headers,
-    method: req.method,
-    query: req.query,
-  };
-  
-  console.log('Path test endpoint called with:', JSON.stringify(pathInfo, null, 2));
-  
-  res.status(200).json({
-    message: 'Path test endpoint',
-    pathInfo
-  });
-});
 
 // Add DB connectivity check middleware for critical endpoints
 const checkDatabaseConnection = async (req: Request, res: Response, next: NextFunction) => {
@@ -120,143 +86,6 @@ if (!isProduction) {
 app.use('/api/auth', authRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/documents', documentsRoutes);
-
-// Direct route for CSV import to avoid nesting issues in some cloud environments
-app.post('/api/import-csv', authenticate, authorize(['admin', 'manager', 'sales']), upload.single('file'), async (req: AuthRequest & { file?: Express.Multer.File }, res: Response) => {
-  console.log('CSV import direct route called');
-  
-  if (!req.file) {
-    return res.status(400).json({ success: false, message: 'No file uploaded' });
-  }
-
-  try {
-    const results: ClientData[] = [];
-    const requiredFields = ['customer_type', 'product', 'insurance_provider', 'client_name', 'mobile_no'];
-    let headerValidated = false;
-    let hasRequiredFields = true;
-    let missingFields: string[] = [];
-
-    // Process the CSV file
-    await new Promise<void>((resolve, reject) => {
-      fs.createReadStream(req.file!.path)
-        .pipe(csv())
-        .on('headers', (headers: string[]) => {
-          // Validate that the CSV has the required fields
-          requiredFields.forEach(field => {
-            if (!headers.includes(field)) {
-              hasRequiredFields = false;
-              missingFields.push(field);
-            }
-          });
-          headerValidated = true;
-        })
-        .on('data', (data) => {
-          const clientData: Partial<ClientData> = {};
-
-          // Map CSV data to client data
-          Object.keys(data).forEach(key => {
-            // Handle numeric fields
-            const numericFields = [
-              'sum_insured', 'basic_premium', 'srcc_premium', 'tc_premium', 
-              'net_premium', 'stamp_duty', 'admin_fees', 'road_safety_fee', 
-              'policy_fee', 'vat_fee', 'total_invoice', 'commission_basic',
-              'commission_srcc', 'commission_tc'
-            ];
-            
-            // Handle date fields
-            const dateFields = [
-              'policy_period_from', 'policy_period_to'
-            ];
-            
-            if (numericFields.includes(key) && data[key]) {
-              // Convert to number and handle empty strings
-              (clientData as any)[key] = data[key] ? parseFloat(data[key]) : 0;
-            } else if (dateFields.includes(key) && data[key]) {
-              // Parse dates
-              try {
-                const date = new Date(data[key]);
-                // Check if date is valid
-                if (!isNaN(date.getTime())) {
-                  (clientData as any)[key] = date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-                } else {
-                  (clientData as any)[key] = data[key]; // Keep original if parsing fails
-                }
-              } catch (err) {
-                console.warn(`Error parsing date for ${key}:`, err);
-                (clientData as any)[key] = data[key]; // Keep original if parsing fails
-              }
-            } else {
-              (clientData as any)[key] = data[key];
-            }
-          });
-
-          // Validate required fields for each row
-          const rowMissingFields = requiredFields.filter(field => 
-            !clientData[field as keyof ClientData] || 
-            clientData[field as keyof ClientData] === ''
-          );
-
-          if (rowMissingFields.length === 0) {
-            results.push(clientData as ClientData);
-          }
-        })
-        .on('end', () => {
-          resolve();
-        })
-        .on('error', (error) => {
-          reject(error);
-        });
-    });
-
-    // Check if headers are valid
-    if (!hasRequiredFields) {
-      return res.status(400).json({ 
-        success: false, 
-        message: `CSV is missing required fields: ${missingFields.join(', ')}` 
-      });
-    }
-
-    // If we have valid data, insert the clients
-    const createdClients: string[] = [];
-    for (const clientData of results) {
-      try {
-        const clientId = await Client.create(clientData);
-        createdClients.push(clientId);
-      } catch (error) {
-        console.error('Error creating client from CSV:', error);
-        // Continue with the next client
-      }
-    }
-
-    // Clean up the uploaded file
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Error deleting temp file:', err);
-    });
-
-    res.status(200).json({ 
-      success: true, 
-      message: `Successfully imported ${createdClients.length} clients`, 
-      count: createdClients.length,
-      ids: createdClients
-    });
-
-  } catch (error) {
-    console.error('Error processing CSV file:', error);
-    
-    // Clean up the uploaded file if it exists
-    if (req.file) {
-      fs.unlink(req.file.path, (err) => {
-        if (err) console.error('Error deleting temp file:', err);
-      });
-    }
-    
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to process CSV file',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
 
 // Basic route
 app.get('/', (req: Request, res: Response) => {
