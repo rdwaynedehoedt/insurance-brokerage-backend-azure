@@ -53,14 +53,13 @@ components:
               type: integer
             email:
               type: string
-              format: email
             firstName:
               type: string
             lastName:
               type: string
             role:
               type: string
-              enum: [admin, manager, sales, underwriter]
+              enum: [admin, manager]
     
     UserResponse:
       type: object
@@ -76,7 +75,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, manager, sales, underwriter]
+          enum: [admin, manager]
     
     CreateUserRequest:
       type: object
@@ -99,7 +98,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, manager, sales, underwriter]
+          enum: [admin, manager]
         phoneNumber:
           type: string
     
@@ -243,6 +242,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Client'
+        totalCount:
+          type: integer
+          description: Total number of clients matching the request (for pagination)
     
     CreateClientResponse:
       type: object
@@ -419,7 +421,7 @@ paths:
       tags:
         - Clients
       summary: Get all clients
-      description: Get paginated list of all clients
+      description: Get paginated list of all clients with optional search functionality
       parameters:
         - in: query
           name: limit
@@ -431,6 +433,11 @@ paths:
           schema:
             type: integer
           description: Number of clients to skip (default 0)
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Search term to filter clients by name or mobile number
       responses:
         '200':
           description: List of clients
@@ -644,7 +651,18 @@ paths:
       tags:
         - Clients
       summary: Search clients
-      description: Search for clients based on criteria
+      description: Search for clients based on criteria with pagination support
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Number of clients to return (default 100)
+        - in: query
+          name: offset
+          schema:
+            type: integer
+          description: Number of clients to skip (default 0)
       requestBody:
         required: true
         content:

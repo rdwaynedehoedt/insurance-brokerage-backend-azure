@@ -194,6 +194,77 @@ export class Client {
     }
   }
   
+  // Get the total count of clients in the database
+  static async getTotalCount(): Promise<number> {
+    try {
+      // Get a database connection
+      const pool = await db.getConnection();
+      const request = pool.request();
+      
+      const result = await request.query('SELECT COUNT(*) as count FROM clients');
+      
+      return result.recordset[0].count;
+    } catch (error) {
+      console.error('Error getting client count:', error);
+      throw error;
+    }
+  }
+  
+  // Search clients with pagination support
+  static async searchWithPagination(searchTerm: string, limit: number = 100, offset: number = 0): Promise<ClientData[]> {
+    try {
+      // Get a database connection
+      const pool = await db.getConnection();
+      const request = pool.request();
+      
+      // Sanitize the search term
+      const searchPattern = `%${searchTerm.replace(/[%_[\]]/g, '\\$&')}%`;
+      
+      request.input('searchPattern', searchPattern);
+      request.input('limit', limit);
+      request.input('offset', offset);
+      
+      const result = await request.query(`
+        SELECT * FROM clients 
+        WHERE client_name LIKE @searchPattern 
+        OR mobile_no LIKE @searchPattern
+        ORDER BY created_at DESC 
+        OFFSET @offset ROWS 
+        FETCH NEXT @limit ROWS ONLY
+      `);
+      
+      return result.recordset;
+    } catch (error) {
+      console.error('Error searching clients with pagination:', error);
+      throw error;
+    }
+  }
+  
+  // Get the total count of search results
+  static async getSearchResultCount(searchTerm: string): Promise<number> {
+    try {
+      // Get a database connection
+      const pool = await db.getConnection();
+      const request = pool.request();
+      
+      // Sanitize the search term
+      const searchPattern = `%${searchTerm.replace(/[%_[\]]/g, '\\$&')}%`;
+      
+      request.input('searchPattern', searchPattern);
+      
+      const result = await request.query(`
+        SELECT COUNT(*) as count FROM clients 
+        WHERE client_name LIKE @searchPattern 
+        OR mobile_no LIKE @searchPattern
+      `);
+      
+      return result.recordset[0].count;
+    } catch (error) {
+      console.error('Error getting search result count:', error);
+      throw error;
+    }
+  }
+  
   // Update a client
   static async update(id: string, data: Partial<ClientData>): Promise<boolean> {
     try {

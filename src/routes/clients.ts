@@ -18,14 +18,34 @@ if (!fs.existsSync(uploadsDir)) {
 const upload = multer({ dest: uploadsDir });
 
 // Get all clients - accessible to managers and sales reps
-router.get('/', authenticate, authorize(['admin', 'manager', 'sales']), async (req: AuthRequest, res: Response) => {
+router.get('/', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
     const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+    const search = req.query.search as string | undefined;
     
-    const clients = await Client.getAll(limit, offset);
+    // Get both the clients for the current page and the total count
+    let clients, totalCount;
     
-    res.status(200).json({ success: true, data: clients });
+    if (search && search.trim() !== '') {
+      // If searching, use the search method with pagination
+      [clients, totalCount] = await Promise.all([
+        Client.searchWithPagination(search, limit, offset),
+        Client.getSearchResultCount(search)
+      ]);
+    } else {
+      // Otherwise get all clients with pagination
+      [clients, totalCount] = await Promise.all([
+        Client.getAll(limit, offset),
+        Client.getTotalCount()
+      ]);
+    }
+    
+    res.status(200).json({ 
+      success: true, 
+      data: clients,
+      totalCount
+    });
   } catch (error) {
     console.error('Error getting clients:', error);
     res.status(500).json({ success: false, message: 'Failed to get clients' });
@@ -33,7 +53,7 @@ router.get('/', authenticate, authorize(['admin', 'manager', 'sales']), async (r
 });
 
 // Get client by ID
-router.get('/:id', authenticate, authorize(['admin', 'manager', 'sales']), async (req: AuthRequest, res: Response) => {
+router.get('/:id', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const client = await Client.getById(id);
@@ -50,7 +70,7 @@ router.get('/:id', authenticate, authorize(['admin', 'manager', 'sales']), async
 });
 
 // Create a new client
-router.post('/', authenticate, authorize(['admin', 'manager', 'sales']), async (req: AuthRequest, res: Response) => {
+router.post('/', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
   try {
     const clientData: ClientData = req.body;
     
@@ -88,7 +108,7 @@ router.post('/', authenticate, authorize(['admin', 'manager', 'sales']), async (
 });
 
 // Update a client
-router.put('/:id', authenticate, authorize(['admin', 'manager', 'sales']), async (req: AuthRequest, res: Response) => {
+router.put('/:id', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const clientData: Partial<ClientData> = req.body;
@@ -214,7 +234,7 @@ router.delete('/:id', authenticate, authorize(['admin', 'manager']), async (req:
 });
 
 // Search clients
-router.post('/search', authenticate, authorize(['admin', 'manager', 'sales']), async (req: AuthRequest, res: Response) => {
+router.post('/search', authenticate, authorize(['admin', 'manager']), async (req: AuthRequest, res: Response) => {
   try {
     const searchCriteria: Partial<ClientData> = req.body;
     
@@ -233,7 +253,7 @@ router.post('/search', authenticate, authorize(['admin', 'manager', 'sales']), a
 });
 
 // Import clients from CSV
-router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']), upload.single('file'), async (req: AuthRequest & { file?: Express.Multer.File }, res: Response) => {
+router.post('/import-csv', authenticate, authorize(['admin', 'manager']), upload.single('file'), async (req: AuthRequest & { file?: Express.Multer.File }, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No file uploaded' });
   }
