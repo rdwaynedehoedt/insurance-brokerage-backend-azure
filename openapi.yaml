@@ -682,7 +682,11 @@ paths:
       tags:
         - Clients
       summary: Import clients from CSV
-      description: Import multiple clients from a CSV file
+      description: |
+        Import multiple clients from a CSV file. 
+        
+        For large files (500+ rows), the response will be streamed with progress updates during processing. 
+        The data is processed in batches of 25 records to improve performance and reduce database load.
       security:
         - BearerAuth: []
       requestBody:
@@ -700,7 +704,11 @@ paths:
                   description: CSV file containing client data. Must include required fields - customer_type, product, insurance_provider, client_name, mobile_no
       responses:
         '200':
-          description: Clients imported successfully
+          description: |
+            Clients imported successfully. 
+            
+            For large imports, response is streamed as chunked transfer encoding with progress updates.
+            Each chunk is a JSON object containing current progress.
           content:
             application/json:
               schema:
@@ -713,6 +721,15 @@ paths:
                   count:
                     type: integer
                     description: Number of clients successfully imported
+                  totalCount:
+                    type: integer
+                    description: Total number of records to process
+                  processedCount:
+                    type: integer
+                    description: Number of records processed so far
+                  progress:
+                    type: integer
+                    description: Percentage of import completed (0-100)
                   ids:
                     type: array
                     items:
