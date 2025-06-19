@@ -244,6 +244,9 @@ router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']
     let headerValidated = false;
     let hasRequiredFields = true;
     let missingFields: string[] = [];
+    const batchSize = 25; // Process 25 records at a time
+    let processedCount = 0;
+    let totalCount = 0;
 
     // Process the CSV file
     await new Promise<void>((resolve, reject) => {
@@ -260,6 +263,7 @@ router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']
           headerValidated = true;
         })
         .on('data', (data) => {
+          totalCount++;
           const clientData: Partial<ClientData> = {};
 
           // Map CSV data to client data
@@ -325,15 +329,67 @@ router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']
       });
     }
 
-    // If we have valid data, insert the clients
+    // Send initial response to client immediately with total count
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Transfer-Encoding': 'chunked'
+    });
+
+    // Send initial progress
+    res.write(JSON.stringify({
+      success: true,
+      message: `Starting import of ${results.length} clients`,
+      totalCount: results.length,
+      processedCount: 0,
+      progress: 0,
+      ids: []
+    }));
+
+    // If we have valid data, insert the clients in batches
     const createdClients: string[] = [];
-    for (const clientData of results) {
+    const batches = [];
+    
+    // Split results into batches of batchSize
+    for (let i = 0; i < results.length; i += batchSize) {
+      batches.push(results.slice(i, i + batchSize));
+    }
+
+    // Process each batch
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const batchPromises = batch.map(clientData => Client.create(clientData));
+      
       try {
-        const clientId = await Client.create(clientData);
-        createdClients.push(clientId);
+        // Wait for all clients in the batch to be created
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        // Process batch results
+        batchResults.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            createdClients.push(result.value);
+          } else {
+            console.error('Error creating client from CSV:', result.reason);
+          }
+        });
+        
+        // Update progress
+        processedCount += batch.length;
+        const progress = Math.round((processedCount / results.length) * 100);
+        
+        // Send progress update to client
+        res.write(JSON.stringify({
+          success: true,
+          message: `Imported ${processedCount} of ${results.length} clients`,
+          totalCount: results.length,
+          processedCount,
+          progress,
+          ids: createdClients
+        }));
+
+        // Add a small delay between batches to prevent database overload
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
-        console.error('Error creating client from CSV:', error);
-        // Continue with the next client
+        console.error('Error processing batch:', error);
       }
     }
 
@@ -342,12 +398,16 @@ router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']
       if (err) console.error('Error deleting temp file:', err);
     });
 
-    res.status(200).json({ 
+    // Send final response and end the stream
+    res.end(JSON.stringify({
       success: true, 
       message: `Successfully imported ${createdClients.length} clients`, 
+      totalCount: results.length,
+      processedCount: processedCount,
+      progress: 100,
       count: createdClients.length,
       ids: createdClients
-    });
+    }));
 
   } catch (error) {
     console.error('Error processing CSV file:', error);
@@ -359,11 +419,21 @@ router.post('/import-csv', authenticate, authorize(['admin', 'manager', 'sales']
       });
     }
     
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to process CSV file',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
+    // Check if headers have already been sent
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to process CSV file',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } else {
+      // End the response with an error message
+      res.end(JSON.stringify({
+        success: false,
+        message: 'Error during import process',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }));
+    }
   }
 });
 

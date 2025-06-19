@@ -85,23 +85,63 @@ export class Client {
       // Add clientId parameter
       paramMap.p1 = clientId;
       
-      const request = pool.request();
+      // Create a new request with retry logic
+      let retries = 3;
+      let lastError: Error | null = null;
       
-      // Add all parameters to the request
-      Object.entries(paramMap).forEach(([key, value]) => {
-        request.input(key, value);
-      });
+      while (retries > 0) {
+        try {
+          const request = pool.request();
+          
+          // Add all parameters to the request
+          Object.entries(paramMap).forEach(([key, value]) => {
+            request.input(key, value);
+          });
+          
+          const query = `
+            INSERT INTO clients (id, ${fields}) 
+            VALUES (@p1, ${paramNames})
+          `;
+          
+          await request.query(query);
+          
+          // If successful, return the client ID
+          return clientId;
+        } catch (err) {
+          console.error(`Error creating client (retries left: ${retries - 1}):`, err);
+          lastError = err instanceof Error ? err : new Error(String(err));
+          
+          // Detect specific SQL error types that might be transient
+          const isTransientError = 
+            (err instanceof Error && 
+             (err.message.includes('timeout') || 
+              err.message.includes('connection') || 
+              err.message.includes('deadlock')));
+          
+          if (isTransientError) {
+            // Only retry for transient errors
+            retries--;
+            if (retries > 0) {
+              // Wait before retrying with exponential backoff
+              const delay = Math.pow(2, 3 - retries) * 100; // 100ms, 200ms, 400ms
+              await new Promise(resolve => setTimeout(resolve, delay));
+              // Re-establish connection if needed
+              await db.ensureConnection();
+              continue;
+            }
+          } else {
+            // For non-transient errors, don't retry
+            retries = 0;
+          }
+        }
+      }
       
-      const query = `
-        INSERT INTO clients (id, ${fields}) 
-        VALUES (@p1, ${paramNames})
-      `;
+      // If we get here, all retries failed
+      if (lastError) {
+        throw lastError;
+      }
       
-      console.log('Client create query:', query);
-      console.log('Client ID:', clientId);
-      
-      const result = await request.query(query);
-      console.log('Client create result:', JSON.stringify(result, null, 2));
+      // Fallback return in case something unexpected happened
       return clientId;
     } catch (error) {
       console.error('Error creating client:', error);
