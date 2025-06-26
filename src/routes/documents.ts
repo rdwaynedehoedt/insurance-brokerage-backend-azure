@@ -598,17 +598,30 @@ router.get('/token/:clientId/:documentType/:filename', authenticate, (req: Reque
   const timestamp = Date.now();
   const token = `${timestamp}_${Math.random().toString(36).substring(2, 15)}`;
   
-  
   // Return the token and public URL
   // Use environment variable for production or fall back to request host
   const isProduction = process.env.NODE_ENV === 'production';
-  const baseUrl = isProduction && process.env.PUBLIC_API_URL
-    ? process.env.PUBLIC_API_URL
-    : req.protocol + '://' + req.get('host');
-    
-  console.log(`Using base URL for token: ${baseUrl}`);
+  console.log('Environment:', {
+    NODE_ENV: process.env.NODE_ENV,
+    isProduction,
+    PUBLIC_API_URL: process.env.PUBLIC_API_URL,
+    host: req.get('host'),
+    protocol: req.protocol
+  });
+  
+  // Make sure we use the public URL in production
+  let baseUrl;
+  if (isProduction) {
+    // HARDCODED FIX: Always use the Choreo URL in production
+    baseUrl = 'https://606464b5-77c7-4bb1-a1b9-9d05cefa3519-dev.e1-us-east-azure.choreoapis.dev/insurance-brokerage/insurance-brokerage-backe/v1.0';
+    console.log(`Using hardcoded Choreo URL: ${baseUrl}`);
+  } else {
+    baseUrl = req.protocol + '://' + req.get('host');
+    console.log(`Using request host: ${baseUrl}`);
+  }
   
   const publicUrl = `${baseUrl}/api/documents/public/${token}/${clientId}/${documentType}/${filename}`;
+  console.log(`Generated public URL: ${publicUrl}`);
   
   res.json({
     token,
