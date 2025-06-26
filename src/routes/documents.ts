@@ -598,6 +598,7 @@ router.get('/token/:clientId/:documentType/:filename', authenticate, (req: Reque
   const timestamp = Date.now();
   const token = `${timestamp}_${Math.random().toString(36).substring(2, 15)}`;
   
+  
   // Return the token and public URL
   // Use environment variable for production or fall back to request host
   const isProduction = process.env.NODE_ENV === 'production';
