@@ -19,9 +19,9 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Middleware
 const corsOptions = {
   origin: isProduction 
-    ? process.env.CORS_ORIGIN || 'https://your-production-domain.com'
+    ? [process.env.CORS_ORIGIN, 'https://ceilaosystem.t3xlk.com'].filter(Boolean) as string[]
     : '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // Allow cookies to be sent with requests
   exposedHeaders: ['Content-Type', 'Content-Disposition'], // Expose headers for download
@@ -29,7 +29,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(helmet()); // Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow cross-origin resource sharing
+})); // Security headers
 app.use(compression()); // Gzip compression
 app.use(express.json());
 app.use(requestLogger); // Log all requests
