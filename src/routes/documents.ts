@@ -599,7 +599,14 @@ router.get('/token/:clientId/:documentType/:filename', authenticate, (req: Reque
   const token = `${timestamp}_${Math.random().toString(36).substring(2, 15)}`;
   
   // Return the token and public URL
-  const baseUrl = req.protocol + '://' + req.get('host');
+  // Use environment variable for production or fall back to request host
+  const isProduction = process.env.NODE_ENV === 'production';
+  const baseUrl = isProduction && process.env.PUBLIC_API_URL
+    ? process.env.PUBLIC_API_URL
+    : req.protocol + '://' + req.get('host');
+    
+  console.log(`Using base URL for token: ${baseUrl}`);
+  
   const publicUrl = `${baseUrl}/api/documents/public/${token}/${clientId}/${documentType}/${filename}`;
   
   res.json({
