@@ -344,17 +344,17 @@ router.get('/public/:token/:clientId/:documentType/:filename', async (req: Reque
     
     console.log(`[${new Date().toISOString()}] Public document request for: ${clientId}/${documentType}/${filename}`);
     
-    // Simple verification to prevent direct access without a proper token
-    // Not using JWT here to keep it simple, just a timestamp-based token with hash
-    // Extract timestamp and verify it's recent
+    // Enhanced token validation
     try {
       if (!token || token.length < 20) {
+        console.log(`[Documents] Invalid token format: ${token}`);
         return res.status(403).json({ message: 'Invalid access token' });
       }
       
       // First part of token is timestamp
       const parts = token.split('_');
       if (parts.length !== 2) {
+        console.log(`[Documents] Invalid token parts: ${parts.length}`);
         return res.status(403).json({ message: 'Invalid token format' });
       }
       
@@ -363,10 +363,41 @@ router.get('/public/:token/:clientId/:documentType/:filename', async (req: Reque
       
       // Ensure token is not too old (30 minute expiration)
       if (isNaN(timestamp) || now - timestamp > 30 * 60 * 1000) {
-        return res.status(403).json({ message: 'Token expired' });
+        console.log(`[Documents] Token expired: created ${new Date(timestamp).toISOString()}, now ${new Date(now).toISOString()}`);
+        return res.status(403).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });
+      }
+
+      // Add rate limiting for token requests (prevent brute force)
+      // Simple in-memory rate limiting - in production use Redis or similar
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+      const requestKey = `${clientIp}:${clientId}:${documentType}`;
+      
+      // Create a global object for tracking request counts if it doesn't exist
+      if (!(global as any).requestCounts) {
+        (global as any).requestCounts = {};
+        (global as any).requestTimestamps = {};
+      }
+      
+      // Check if this IP has made too many requests for this document
+      const requestCounts = (global as any).requestCounts;
+      const requestTimestamps = (global as any).requestTimestamps;
+      
+      // Reset counts if it's been more than 5 minutes
+      if (requestTimestamps[requestKey] && now - requestTimestamps[requestKey] > 5 * 60 * 1000) {
+        requestCounts[requestKey] = 0;
+      }
+      
+      // Update timestamps and counts
+      requestTimestamps[requestKey] = now;
+      requestCounts[requestKey] = (requestCounts[requestKey] || 0) + 1;
+      
+      // If more than 10 requests in 5 minutes, block
+      if (requestCounts[requestKey] > 10) {
+        console.log(`[Documents] Rate limit exceeded for ${requestKey}`);
+        return res.status(429).json({ message: 'Too many requests for this document' });
       }
     } catch (error) {
-      console.error('Error validating token:', error);
+      console.error('[Documents] Error validating token:', error);
       return res.status(403).json({ message: 'Invalid access token' });
     }
     
@@ -594,19 +625,31 @@ router.get('/public/:token/:clientId/:documentType/:filename', async (req: Reque
 router.get('/token/:clientId/:documentType/:filename', authenticate, (req: Request, res: Response) => {
   const { clientId, documentType, filename } = req.params;
   
-  // Create a simple time-based token
-  const timestamp = Date.now();
-  const token = `${timestamp}_${Math.random().toString(36).substring(2, 15)}`;
+  console.log(`[Documents] Token generation request for ${clientId}/${documentType}/${filename}`);
   
-  // Return the token and public URL
-  const baseUrl = req.protocol + '://' + req.get('host');
-  const publicUrl = `${baseUrl}/api/documents/public/${token}/${clientId}/${documentType}/${filename}`;
-  
-  res.json({
-    token,
-    url: publicUrl,
-    expires: new Date(timestamp + 30 * 60 * 1000).toISOString() // 30 minutes
-  });
+  try {
+    // Create a more secure time-based token
+    const timestamp = Date.now();
+    const randomBytes = require('crypto').randomBytes(16).toString('hex');
+    const token = `${timestamp}_${randomBytes.substring(0, 12)}`;
+    
+    // Return the token and public URL
+    const baseUrl = req.protocol + '://' + req.get('host');
+    const publicUrl = `${baseUrl}/api/documents/public/${token}/${clientId}/${documentType}/${filename}`;
+    
+    // Add logging for debugging
+    console.log(`[Documents] Generated token: ${token.substring(0, 15)}... for ${clientId}/${documentType}/${filename}`);
+    console.log(`[Documents] Public URL: ${publicUrl}`);
+    
+    res.json({
+      token,
+      url: publicUrl,
+      expires: new Date(timestamp + 30 * 60 * 1000).toISOString() // 30 minutes
+    });
+  } catch (error) {
+    console.error(`[Documents] Error generating token:`, error);
+    res.status(500).json({ message: 'Failed to generate document token' });
+  }
 });
 
 export default router; 

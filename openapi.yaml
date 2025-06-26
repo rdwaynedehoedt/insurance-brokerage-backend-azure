@@ -284,6 +284,19 @@ components:
           type: string
         expiresIn:
           type: string
+    
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Temporary access token
+        url:
+          type: string
+          description: Public URL with token for accessing the document
+        expires:
+          type: string
+          description: ISO timestamp when the token expires
 
 security:
   - BearerAuth: []
@@ -1079,17 +1092,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  token:
-                    type: string
-                    description: Temporary access token
-                  url:
-                    type: string
-                    description: Public URL with token for accessing the document
-                  expires:
-                    type: string
-                    description: ISO timestamp when the token expires
+                $ref: '#/components/schemas/TokenResponse'
         '401':
           description: Unauthorized - Not authenticated
           content:

@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth';
 import clientRoutes from './routes/clients';
 import documentsRoutes from './routes/documents';
@@ -19,20 +20,46 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Middleware
 const corsOptions = {
   origin: isProduction 
-    ? process.env.CORS_ORIGIN || 'https://your-production-domain.com'
+    ? process.env.CORS_ORIGIN?.split(',') || 'https://your-production-domain.com'
     : '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true, // Allow cookies to be sent with requests
   exposedHeaders: ['Content-Type', 'Content-Disposition'], // Expose headers for download
   maxAge: 86400 // 24 hours
 };
 
+// Security middleware
 app.use(cors(corsOptions));
 app.use(helmet()); // Security headers
 app.use(compression()); // Gzip compression
-app.use(express.json());
+app.use(express.json({ limit: '2mb' })); // Limit JSON payload size
+app.use(express.urlencoded({ extended: true, limit: '2mb' })); // Limit URL-encoded payload size
 app.use(requestLogger); // Log all requests
+
+// Implement rate limiting for sensitive endpoints
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 login attempts per windowMs
+  message: { message: 'Too many login attempts, please try again after 15 minutes' },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Apply rate limiting to login endpoint
+app.use('/api/auth/login', loginLimiter);
+
+// General API rate limiter
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 300, // limit each IP to 300 requests per windowMs
+  message: { message: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply general rate limiting to all API routes
+app.use('/api', apiLimiter);
 
 // Add DB connectivity check middleware for critical endpoints
 const checkDatabaseConnection = async (req: Request, res: Response, next: NextFunction) => {
@@ -57,30 +84,18 @@ const checkDatabaseConnection = async (req: Request, res: Response, next: NextFu
 // Apply the database check middleware
 app.use(checkDatabaseConnection);
 
-// TODO: Implement rate limiting for sensitive endpoints, especially login
-// Example setup for rate limiting (uncomment and install 'express-rate-limit' package)
-/*
-import rateLimit from 'express-rate-limit';
-
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 login attempts per windowMs
-  message: 'Too many login attempts from this IP, please try again after 15 minutes',
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+// Security headers middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Additional security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
 });
-
-// Apply rate limiting to login endpoint
-app.use('/api/auth/login', loginLimiter);
-*/
-
-// Remove test routes in production
-/*
-if (!isProduction) {
-  const testRoutes = require('./routes/test').default;
-  app.use('/api', testRoutes);
-}
-*/
 
 // Routes
 app.use('/api/auth', authRoutes);
